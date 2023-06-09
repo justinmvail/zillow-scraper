@@ -16,7 +16,7 @@ public class ZillowSearchAggregate {
 
     public int getExpectedNumberOfListings(){
         AtomicInteger count = new AtomicInteger();
-        searches.forEach(x-> count.addAndGet(x.getResult().getExpectedListingCount()));
+        searches.forEach(x-> count.addAndGet(x.getResult().getExpectedListingCount().getCount()));
         return count.get();
     }
 

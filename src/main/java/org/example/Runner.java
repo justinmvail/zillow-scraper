@@ -17,6 +17,7 @@ public class Runner {
                 .stateAbbreviation("sc")
                 .minimumPrice(1)
                 .maximumPrice(25_000_000)
+                //.maximumPrice(500_000)
                 .minimumBaths(1)
                 .minimumBedrooms(1)
                 .minimumSquareFootage(100)

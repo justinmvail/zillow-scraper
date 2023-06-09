@@ -2,6 +2,7 @@ package org.example.selenium;
 
 import org.openqa.selenium.firefox.FirefoxDriver;
 import org.openqa.selenium.firefox.FirefoxOptions;
+import org.openqa.selenium.remote.RemoteWebDriver;
 
 public class DriverManager {
 
@@ -15,7 +16,7 @@ public class DriverManager {
         return new FirefoxDriver(options);
     }
 
-    public static void closeDriver(FirefoxDriver driver){
+    public static void closeDriver(RemoteWebDriver driver){
         driver.quit();
     }
 

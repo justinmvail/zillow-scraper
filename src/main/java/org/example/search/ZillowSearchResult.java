@@ -9,7 +9,7 @@ import java.util.Set;
 @Builder
 public class ZillowSearchResult {
 
-    private int expectedListingCount;
+    private ListingCount expectedListingCount;
 
     private Set<String> ListingLinks;
 

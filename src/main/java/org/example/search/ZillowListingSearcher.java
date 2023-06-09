@@ -13,6 +13,7 @@ import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.firefox.FirefoxDriver;
+import org.openqa.selenium.remote.RemoteWebDriver;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 
@@ -55,7 +56,7 @@ public class ZillowListingSearcher {
     private ZillowSearchCriteria findMissingResults(ZillowSearchAggregate aggregate){
         for (ZillowSearch zillowSearch : aggregate.getSearches()){
             ZillowSearchResult result = zillowSearch.getResult();
-            if (result.getListingLinks().size() < result.getExpectedListingCount()) {
+            if (result.getListingLinks().size() < result.getExpectedListingCount().getCount()) {
                 return zillowSearch.getCriteria();
             }
         }
@@ -63,22 +64,22 @@ public class ZillowListingSearcher {
     }
 
     private boolean isCountValid(ZillowSearchAggregate aggregate){
-        if(aggregate.getExpectedNumberOfListings()>aggregate.getActualNumberOfListings()) {
-            return false;
-        }
-        return true;
+        if(aggregate.getSearches().stream()
+                .anyMatch(x->x.getResult().getExpectedListingCount().getStatus()==Status.ERROR)){
+            return true;
+        }else return aggregate.getExpectedNumberOfListings() <= aggregate.getActualNumberOfListings();
     }
 
     private ZillowSearch search(ZillowSearch search) {
-        int totalListings = getListingCount(search.getCriteria());
-        int pageCount = totalListings / LISTINGS_PER_PAGE;
-        int remainder = totalListings % LISTINGS_PER_PAGE;
+        ListingCount listingCount = getListingCount(search.getCriteria());
+        int pageCount = listingCount.getCount() / LISTINGS_PER_PAGE;
+        int remainder = listingCount.getCount() % LISTINGS_PER_PAGE;
         if (remainder > 0) {
             pageCount++;
         }
         Set<String> filteredLinks = new HashSet<>();
         for (int i = 1; i <= pageCount; i++) {
-            FirefoxDriver loopDriver = DriverManager.getDriver();
+            RemoteWebDriver loopDriver = DriverManager.getDriver();
             search.getCriteria().setPagination(Pagination.builder().currentPage(i).build());
             String url = search.getCriteria().getUrl();
             WebElement resultsDiv = null;
@@ -104,9 +105,12 @@ public class ZillowListingSearcher {
     private List<ZillowSearch> verifyAndCorrectSearchSplit(List<ZillowSearch> zillowSearch){
         List<ZillowSearch> verified = new ArrayList<>();
         zillowSearch.forEach(x->{
-            int listingCount = getListingCount(x.getCriteria());
-            x.setResult(ZillowSearchResult.builder().expectedListingCount(listingCount).build());
-            if(listingCount<= MAX_PAGES * LISTINGS_PER_PAGE){
+            ListingCount listingCount = getListingCount(x.getCriteria());
+            x.setResult(ZillowSearchResult
+                    .builder()
+                    .expectedListingCount(listingCount)
+                    .build());
+            if(listingCount.getCount()<= MAX_PAGES * LISTINGS_PER_PAGE){
                 x.setResult(ZillowSearchResult.builder().expectedListingCount(listingCount).build());
                 verified.add(x);
             }else{
@@ -118,13 +122,13 @@ public class ZillowListingSearcher {
 
     private List<ZillowSearch> splitCriteria(ZillowSearch search) {
         List<ZillowSearch> zillowSearches = new ArrayList<>();
-        if(search.getResult().getExpectedListingCount() <= MAX_PAGES * LISTINGS_PER_PAGE){
+        if(search.getResult().getExpectedListingCount().getCount() <= MAX_PAGES * LISTINGS_PER_PAGE){
             List<ZillowSearch> list = new ArrayList<>();
             list.add(search);
             return list;
         }else {
-            int numberOfSearches = search.getResult().getExpectedListingCount()/(MAX_PAGES * LISTINGS_PER_PAGE);
-            if(numberOfSearches == 1 && search.getResult().getExpectedListingCount() > MAX_PAGES * LISTINGS_PER_PAGE){
+            int numberOfSearches = search.getResult().getExpectedListingCount().getCount()/(MAX_PAGES * LISTINGS_PER_PAGE);
+            if(numberOfSearches == 1 && search.getResult().getExpectedListingCount().getCount() > MAX_PAGES * LISTINGS_PER_PAGE){
                 numberOfSearches ++;
             }
             List<ZillowSearchCriteria> zillowSearchCriteria = splitCriteria(search.getCriteria(), numberOfSearches);
@@ -154,27 +158,36 @@ public class ZillowListingSearcher {
         return searches;
     }
 
-    private int getListingCount(ZillowSearchCriteria searchCriteria){
+    private ListingCount getListingCount(ZillowSearchCriteria searchCriteria){
         String urlForCount = searchCriteria.getUrl();
-        FirefoxDriver getCountDriver = DriverManager.getDriver();
-        getCountDriver.get(urlForCount);
+        RemoteWebDriver countDriver = DriverManager.getDriver();
+        countDriver.get(urlForCount);
 
-        WebElement totalListingCountElement = null;
+        WebElement totalListingCountElement;
+        WebElement noResults;
         int totalListings = 0;
-        WebDriverWait wait = new WebDriverWait(getCountDriver, Duration.ofSeconds(ELEMENT_TIMEOUT));
+        WebDriverWait wait = new WebDriverWait(countDriver, Duration.ofSeconds(ELEMENT_TIMEOUT));
         try {
             totalListingCountElement = wait.until(
                     ExpectedConditions.visibilityOfElementLocated(By.cssSelector(".result-count")));
         } catch (TimeoutException e) {
             System.out.println(".result-count could not be found within the specified timeout.");
+            System.out.println(e.getMessage());
+            noResults = new WebDriverWait(countDriver, Duration.ofSeconds(ELEMENT_TIMEOUT)).until(
+                    ExpectedConditions.visibilityOfElementLocated(By.cssSelector("h5.Text-c11n-8-84-0__sc-aiai24-0")));
+            DriverManager.closeDriver(countDriver);
+            if("No matching results".equals(noResults.getText().trim())){
+                return ListingCount.builder().status(Status.COMPLETE).build();
+            }
+            return ListingCount.builder().status(Status.ERROR).build();
         }
         if (totalListingCountElement != null){
             totalListings = (extractLeadingNumber(totalListingCountElement.getText().trim()));
-            DriverManager.closeDriver(getCountDriver);
-            return totalListings;
+            DriverManager.closeDriver(countDriver);
+            return ListingCount.builder().count(totalListings).status(Status.COMPLETE).build();
         }
-        DriverManager.closeDriver(getCountDriver);
-        return totalListings;
+        DriverManager.closeDriver(countDriver);
+        return ListingCount.builder().count(totalListings).status(Status.COMPLETE).build();
     }
 
     private int extractLeadingNumber(String input) {
@@ -182,7 +195,7 @@ public class ZillowListingSearcher {
         return Integer.parseInt(numberString);
     }
 
-    private Set<String> getListings(FirefoxDriver driver, WebElement gridResultsDiv, int listingCount) {
+    private Set<String> getListings(RemoteWebDriver driver, WebElement gridResultsDiv, int listingCount) {
         long startNano = System.nanoTime();
         if (listingCount == 0) return new HashSet<>();
         int totalScrolled = 0;
